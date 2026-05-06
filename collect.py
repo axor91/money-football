@@ -126,7 +126,7 @@ def fetch_html(session: requests.Session, snap: Snapshot) -> str:
 
 
 _VALUE_RE = re.compile(
-    r"([\d][\d.,]*)\s*(bill|bn|mrd|mill|mio|m|k|th|млрд|млн|тыс)?",
+    r"([\d][\d.,]*)\s*(bill|bil|bn|mrd|mill|mio|m|k|th|млрд|млн|тыс)?",
     re.IGNORECASE,
 )
 
@@ -162,7 +162,7 @@ def parse_value_to_eur_m(text: str | None) -> float | None:
     except ValueError:
         return None
 
-    if suffix in ("bn", "mrd", "bill", "млрд"):
+    if suffix in ("bn", "mrd", "bill", "bil", "млрд"):
         return round(num * 1_000, 2)
     if suffix in ("k", "th", "тыс"):
         return round(num / 1_000, 4)
