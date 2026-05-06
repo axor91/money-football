@@ -84,9 +84,9 @@ LEAGUE_COLORS = {
     "Германия": "#D4A017",    # Бундеслига — жёлтый/охра
     "Италия": "#1E5128",      # Серия А — итальянский зелёный
     "Франция": "#091C5C",     # Лига 1 — глубокий синий
-    "Нидерланды": "#E96A1A",  # Эредивизи — оранжевый
-    "Португалия": "#0F766E",  # Примейра — бирюзовый
+    "Прочие": "#9CA3AF",      # Эредивизи + Примейра + редкие клубы
 }
+MAJOR_LEAGUES = {"Англия", "Испания", "Германия", "Италия", "Франция"}
 
 PALETTE = [
     "#DC2626", "#2563EB", "#059669", "#7C3AED", "#EA580C",
@@ -632,22 +632,29 @@ with c_left:
         unsafe_allow_html=True,
     )
 
+df_league = df.copy()
+df_league["league"] = df_league["country_ru"].where(
+    df_league["country_ru"].isin(MAJOR_LEAGUES), "Прочие",
+)
 country_totals = (
-    df.groupby(["snapshot_date", "country_ru"])["value_eur_m"]
+    df_league.groupby(["snapshot_date", "league"])["value_eur_m"]
     .sum().reset_index()
 )
-country_order = (
-    df.groupby("country_ru")["value_eur_m"].sum()
+# Большие лиги внизу стека, "Прочие" наверху.
+big_first = (
+    df_league[df_league["league"].isin(MAJOR_LEAGUES)]
+    .groupby("league")["value_eur_m"].sum()
     .sort_values(ascending=False).index.tolist()
 )
+country_order = big_first + (["Прочие"] if (df_league["league"] == "Прочие").any() else [])
 
 is_share = league_mode == "Доля, %"
 groupnorm = "percent" if is_share else None
 
 fig_l = go.Figure()
 for country in country_order:
-    sub = country_totals[country_totals["country_ru"] == country].sort_values("snapshot_date")
-    color = LEAGUE_COLORS.get(country, "#94A3B8")
+    sub = country_totals[country_totals["league"] == country].sort_values("snapshot_date")
+    color = LEAGUE_COLORS.get(country, "#9CA3AF")
     fig_l.add_trace(go.Scatter(
         x=sub["snapshot_date"], y=sub["value_eur_m"],
         mode="lines",
@@ -676,6 +683,7 @@ layout_l = dict(
         orientation="h", yanchor="bottom", y=-0.22, xanchor="left", x=0,
         font=dict(family="Inter", size=11, color=INK),
         bgcolor="rgba(255,255,255,0)", borderwidth=0,
+        traceorder="normal",
     ),
     xaxis=dict(
         showgrid=False, showline=True, linecolor="#E5E7EB",
