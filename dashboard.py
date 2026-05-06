@@ -79,13 +79,13 @@ CLUB_COUNTRY_OVERRIDE = {
 }
 
 LEAGUE_COLORS = {
-    "Англия": "#DC2626",
-    "Испания": "#F59E0B",
-    "Германия": "#0891B2",
-    "Италия": "#16A34A",
-    "Франция": "#7C3AED",
-    "Нидерланды": "#EC4899",
-    "Португалия": "#0EA5E9",
+    "Англия": "#38003C",      # АПЛ — фирменный фиолетовый
+    "Испания": "#B91C1C",     # Ла Лига — красный
+    "Германия": "#D4A017",    # Бундеслига — жёлтый/охра
+    "Италия": "#1E5128",      # Серия А — итальянский зелёный
+    "Франция": "#091C5C",     # Лига 1 — глубокий синий
+    "Нидерланды": "#E96A1A",  # Эредивизи — оранжевый
+    "Португалия": "#0F766E",  # Примейра — бирюзовый
 }
 
 PALETTE = [
@@ -406,8 +406,17 @@ with st.sidebar:
     smooth = st.checkbox("Сглаживать линии", value=True)
     log_scale = st.checkbox("Логарифмическая шкала", value=False)
 
-    st.markdown("### Поделиться")
-    st.caption("Текущий выбор сохраняется в URL — скопируй адресную строку, чтобы поделиться.")
+    st.markdown("### Данные")
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Скачать CSV",
+        data=csv_bytes,
+        file_name="football-top25-2019-2026.csv",
+        mime="text/csv",
+        width="stretch",
+    )
+
+    st.caption("Выбор клубов и стран сохраняется в URL — копируй адресную строку, чтобы поделиться.")
 
 # Записываем выбор в URL
 new_qp = {}
@@ -606,12 +615,22 @@ st.markdown(insight_html, unsafe_allow_html=True)
 
 # ───────── Секция "По лигам" ─────────────────────────────────────────────────
 st.markdown("## Соотношение лиг")
-st.markdown(
-    '<p class="footer" style="border:none;padding:0;margin:0 0 0.8rem 0;color:#6B7280;'
-    'font-size:0.95rem;max-width:760px;">Сумма стоимости клубов из топ-25 в каждой лиге, '
-    'по полугодиям. Чем шире полоса — тем больше «вес» лиги.</p>',
-    unsafe_allow_html=True,
-)
+
+c_left, c_right = st.columns([3, 1])
+with c_right:
+    league_mode = st.radio(
+        "режим",
+        ["Сумма, € млн", "Доля, %"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+with c_left:
+    st.markdown(
+        '<p style="color:#6B7280;font-size:0.95rem;max-width:760px;line-height:1.5;'
+        'margin:0 0 0.8rem 0;">Стоимость клубов из топ-25, сгруппированных по лиге. '
+        'Цвета — фирменные оттенки лиг (АПЛ — фиолетовый, Ла Лига — красный, и т.д.).</p>',
+        unsafe_allow_html=True,
+    )
 
 country_totals = (
     df.groupby(["snapshot_date", "country_ru"])["value_eur_m"]
@@ -622,6 +641,9 @@ country_order = (
     .sort_values(ascending=False).index.tolist()
 )
 
+is_share = league_mode == "Доля, %"
+groupnorm = "percent" if is_share else None
+
 fig_l = go.Figure()
 for country in country_order:
     sub = country_totals[country_totals["country_ru"] == country].sort_values("snapshot_date")
@@ -630,10 +652,15 @@ for country in country_order:
         x=sub["snapshot_date"], y=sub["value_eur_m"],
         mode="lines",
         stackgroup="one",
+        groupnorm=groupnorm,
         line=dict(width=0.5, color=color),
         fillcolor=color,
         name=country,
-        hovertemplate=f"<b>{country}</b><br>%{{x|%b %Y}}<br>€%{{y:.0f}} млн<extra></extra>",
+        hovertemplate=(
+            f"<b>{country}</b><br>%{{x|%b %Y}}<br>%{{y:.1f}}%<extra></extra>"
+            if is_share
+            else f"<b>{country}</b><br>%{{x|%b %Y}}<br>€%{{y:.0f}} млн<extra></extra>"
+        ),
     ))
 
 layout_l = dict(
@@ -658,8 +685,13 @@ layout_l = dict(
     ),
     yaxis=dict(
         gridcolor="#F3F4F6", zeroline=False, showline=False,
-        title=dict(text="млн €", font=dict(size=11, color=GREY_INK), standoff=8),
+        title=dict(
+            text="доля, %" if is_share else "млн €",
+            font=dict(size=11, color=GREY_INK), standoff=8,
+        ),
         tickfont=dict(size=11, color=GREY_INK),
+        ticksuffix="%" if is_share else None,
+        range=[0, 100] if is_share else None,
     ),
 )
 fig_l.update_layout(**layout_l)
@@ -758,9 +790,24 @@ top15_rev = top15.iloc[::-1]
 
 st.markdown(f"## Рейтинг · {fmt_month(last_snap)}")
 
-bar_colors = [ACCENT if r == top15["rank"].min() else NAVY for r in top15_rev["rank"]]
+first_lookup = first.set_index("club")["value_eur_m"]
+deltas = []
+delta_texts = []
+for _, row in top15_rev.iterrows():
+    v_first = first_lookup.get(row["club"])
+    if pd.isna(v_first) or v_first is None:
+        deltas.append(None); delta_texts.append("новичок топа")
+        continue
+    delta = row["value_eur_m"] - v_first
+    pct = delta / v_first * 100
+    deltas.append(delta)
+    arrow = "▲" if delta >= 0 else "▼"
+    delta_texts.append(f"{arrow} {pct:+.0f}%")
+
+bar_colors = [LEAGUE_COLORS.get(c, NAVY) for c in top15_rev["country_ru"]]
 bar_text = [fmt_eur(v) for v in top15_rev["value_eur_m"]]
 bar_labels_ru = [ru(c) for c in top15_rev["club"]]
+hover_data = list(zip(top15_rev["country_ru"], delta_texts))
 
 fig3 = go.Figure(go.Bar(
     x=top15_rev["value_eur_m"],
@@ -771,31 +818,77 @@ fig3 = go.Figure(go.Bar(
     textposition="outside",
     textfont=dict(family="Inter", size=11, color=INK),
     cliponaxis=False,
-    hovertemplate="<b>%{y}</b><br>€%{x:.0f} млн<extra></extra>",
+    customdata=hover_data,
+    hovertemplate="<b>%{y}</b><br>%{customdata[0]}<br>€%{x:.0f} млн<br>%{customdata[1]} к 2019<extra></extra>",
 ))
+
+x_max = top15_rev["value_eur_m"].max() * 1.32
+delta_x = x_max * 0.92
+for y_label, dtxt, delta in zip(bar_labels_ru, delta_texts, deltas):
+    color = "#059669" if (delta is not None and delta > 0) else ("#DC2626" if delta is not None else "#9CA3AF")
+    fig3.add_annotation(
+        x=delta_x, y=y_label,
+        text=f"<b>{dtxt}</b>",
+        showarrow=False, xanchor="left", yanchor="middle",
+        font=dict(family="Inter", size=11, color=color),
+    )
+
 fig3.update_layout(
     height=520,
     template="simple_white", plot_bgcolor="white", paper_bgcolor="white",
     font=dict(family="Inter, system-ui, sans-serif", size=12, color=INK),
-    margin=dict(l=10, r=140, t=10, b=20),
+    margin=dict(l=10, r=10, t=10, b=20),
     xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, showline=False,
-               range=[0, top15_rev["value_eur_m"].max() * 1.18]),
+               range=[0, x_max]),
     yaxis=dict(showgrid=False, tickfont=dict(size=12, color=INK), automargin=True),
     bargap=0.4,
 )
 st.plotly_chart(fig3, width="stretch", config=plotly_config("football-clubs-ranking"))
 
 st.markdown("### Полный рейтинг")
+
+trend_map = (
+    scope.sort_values("snapshot_date")
+    .groupby("club")["value_eur_m"]
+    .apply(list)
+    .to_dict()
+)
+
+table_rows = []
+for _, row in latest_in_scope.iterrows():
+    v_first = first_lookup.get(row["club"])
+    if pd.isna(v_first) or v_first is None:
+        delta_pct = None
+        delta_abs = None
+    else:
+        delta_abs = row["value_eur_m"] - v_first
+        delta_pct = delta_abs / v_first * 100
+    table_rows.append({
+        "#": int(row["rank"]),
+        "Клуб": ru(row["club"]),
+        "Лига": row["country_ru"],
+        "Стоимость, млн €": float(row["value_eur_m"]),
+        "Δ к 2019, %": delta_pct,
+        "Динамика": trend_map.get(row["club"], []),
+    })
+
+table_df = pd.DataFrame(table_rows)
+
 st.dataframe(
-    latest_in_scope.assign(club_ru=latest_in_scope["club"].map(ru))
-        [["rank", "club_ru", "country_ru", "value_eur_m"]].rename(columns={
-            "rank": "#",
-            "club_ru": "Клуб",
-            "country_ru": "Страна",
-            "value_eur_m": "Стоимость, млн €",
-        }),
+    table_df,
     width="stretch",
     hide_index=True,
+    column_config={
+        "#": st.column_config.NumberColumn(width="small", format="%d"),
+        "Стоимость, млн €": st.column_config.NumberColumn(format="%.0f"),
+        "Δ к 2019, %": st.column_config.NumberColumn(format="%+.0f%%"),
+        "Динамика": st.column_config.LineChartColumn(
+            "Динамика 2019—2026",
+            y_min=float(scope["value_eur_m"].min()),
+            y_max=float(scope["value_eur_m"].max()),
+            width="medium",
+        ),
+    },
 )
 
 
@@ -803,8 +896,8 @@ st.dataframe(
 st.markdown(
     f'<div class="footer">'
     f'<b>Методология.</b> Совокупная рыночная стоимость состава по версии Transfermarkt, '
-    f'в млн евро. Исторические значения восстановлены по архивным снапшотам Wayback Machine — '
-    f'один срез на каждый квартал, отклонение от целевой даты ≤ 60 дней. '
+    f'в млн евро. Исторические значения восстановлены по архивным снапшотам Wayback Machine: '
+    f'четыре среза в год (январь / апрель / июль / октябрь), отклонение от целевой даты ≤ 60 дней. '
     f'Каждый снапшот = первая страница рейтинга (топ-25 клубов).<br>'
     f'<b>Период:</b> {fmt_month(first_snap, short=True)} → {fmt_month(last_snap, short=True)} · '
     f'<b>Срезов:</b> {df["snapshot_date"].nunique()} · '
